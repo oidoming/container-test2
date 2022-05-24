@@ -1,48 +1,59 @@
-#!/usr/bin/env bash
+#!/bin/sh
 
-# from https://www.redhat.com/sysadmin/getting-started-buildah & https://www.redhat.com/sysadmin/building-buildah
+# From https://pagure.io/centos-sig-hyperscale/containers-releng/blob/main/f/make-hyperscale-container.sh
 
-set -o errexit
-
+releasever="$1"
+[ -z "$releasever" ] && releasever='8'
 dnf_opts="-y --setopt install_weak_deps=false"
+packages='epel-release dnf dnf-plugins-core systemd'
+if [ "$releasever" -eq 8 ]; then
+  crb_repo="powertools"
+  dnf_opts="$dnf_opts --disableplugin product-id"
+else
+  crb_repo="crb"
+fi
 
-# Create a container
-container=$(buildah from scratch)
-
-# Labels are part of the "buildah config" command
-buildah config --label maintainer="user123" $container
-
+summary="CentOS Stream $releasever test container XD"
+ 
+if ! grep -q "CentOS Stream $releasever" /etc/os-release; then
+  echo "You need to run this on a CentOS Stream $releasever host"
+  exit 1
+fi
+ 
 script=$(mktemp)
 trap 'rm -f $script' EXIT
-
+ 
 # Hack to make these work with docker on el7
 # https://access.redhat.com/solutions/6843481
 export BUILDAH_FORMAT=docker
-
+ 
 newcontainer=$(buildah from scratch)
-
+ 
 cat > "$script" <<EOF
-#!/usr/bin/env bash 
-mountpoint=\$(buildah mount "$newcontainer")
-dnf="dnf $dnf_opts --installroot \$mountpoint"
-\$dnf install --releasever 8 tar gzip gcc make curl
+#!/bin/sh -x
+scratchmnt=\$(buildah mount "$newcontainer")
+dnf="dnf $dnf_opts --installroot \$scratchmnt"
+\$dnf install --releasever "$releasever" $packages
+\$dnf config-manager --set-enabled "$crb_repo"
 \$dnf distro-sync
 \$dnf clean all
-curl -sSL http://ftpmirror.gnu.org/hello/hello-2.10.tar.gz \
-     -o /tmp/hello-2.10.tar.gz
-tar xvzf /tmp/hello-2.10.tar.gz -C ${mountpoint}/opt
-pushd ${mountpoint}/opt/hello-2.10
-./configure
-make
-make install DESTDIR=${mountpoint}
-popd
 buildah unmount "$newcontainer"
 EOF
 chmod +x "$script"
 buildah unshare "$script"
-
-# Entrypoint, too, is a “buildah config” command
-buildah config --entrypoint /usr/local/bin/hello $container
-
-# Finally saves the running container to an image
-buildah commit $container hello:latest
+ 
+buildah config \
+  --created-by 'build.sh' \
+  --label name='centos-test' \
+  --label version="${releasever}" \
+  --label architecture="$(uname -m)" \
+  --label summary="${summary}" \
+  --label description="${description}" \
+  --label io.k8s.display-name="CentOS Stream ${releasever} test" \
+  --label io.k8s.description="${description}" \
+  --cmd '/bin/bash' \
+  "$newcontainer"
+buildah commit "$newcontainer" "centos-stream-${releasever}-test"
+buildah rm "$newcontainer"
+ 
+exit 0

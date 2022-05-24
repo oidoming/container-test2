@@ -21,12 +21,14 @@ RUN echo build:2000:50000 > /etc/subuid \
  && echo build:2000:50000 > /etc/subgid
 
 COPY build.sh build
+COPY autobuild.sh autobuild
 
 #RUN chgrp -R 0 $HOME && \ 
 #         chmod -R g=u $HOME
 
 RUN chmod +x build
+RUN chmod +x autobuild
 
-ENTRYPOINT ["./build"]
-CMD ["build"]
+ENTRYPOINT ["./autobuild"]
+CMD ["8"]
 
