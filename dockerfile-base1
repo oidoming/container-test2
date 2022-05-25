@@ -5,6 +5,8 @@ FROM quay.io/centos/centos:stream8
 RUN dnf -y install tar gzip gcc make curl buildah fuse-overlayfs; rm -rf /var/cache /var/log/dnf* /var/log/yum.*
 
 ADD https://raw.githubusercontent.com/containers/buildah/main/contrib/buildahimage/stable/containers.conf /etc/containers/
+ADD https://raw.githubusercontent.com/containers/storage/main/storage.conf /etc/containers/
+
 
 # Adjust storage.conf to enable Fuse storage.
 RUN sed -i /etc/containers/storage.conf \
