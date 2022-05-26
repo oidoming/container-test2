@@ -25,8 +25,8 @@ RUN echo build:2000:50000 > /etc/subuid \
 COPY build.sh build
 COPY autobuild.sh autobuild
 
-#RUN chgrp -R 0 $HOME && \ 
-#         chmod -R g=u $HOME
+RUN chgrp -R 0 /etc/containers/storage.conf && \ 
+    chmod -R g=u /etc/containers/storage.conf
 
 RUN chmod +x build
 RUN chmod +x autobuild
