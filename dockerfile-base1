@@ -55,14 +55,18 @@ RUN echo "export BUILDAH_ISOLATION=chroot" >> /home/build/.bashrc
 RUN mkdir -p /home/build/.config/containers \
  && (echo '[storage]';echo 'driver = "vfs"') > /home/build/.config/containers/storage.conf
 
+RUN chgrp -R 0 /home/build && \ 
+         chmod -R g=u /home/build
+
+WORKDIR /home/build
+
 COPY build.sh build
 COPY autobuild.sh autobuild
 
 RUN chmod +x build
 RUN chmod +x autobuild
 
-USER build
-WORKDIR /home/build
+USER 1001
 
 ENTRYPOINT ["./autobuild"]
 CMD ["8"]
