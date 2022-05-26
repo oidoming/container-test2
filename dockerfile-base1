@@ -1,37 +1,68 @@
-FROM quay.io/centos/centos:stream8
+FROM quay.io/centoshyperscale/centos:stream8
 
 # from https://pagure.io/centos-sig-hyperscale/containers-releng/blob/main/f/Containerfile
 
-RUN dnf -y install tar gzip gcc make curl buildah fuse-overlayfs; rm -rf /var/cache /var/log/dnf* /var/log/yum.*
+RUN rpm --restore shadow-utils 2>/dev/null
+RUN dnf -y install tar gcc make curl buildah fuse-overlayfs xz; rm -rf /var/cache /var/log/dnf* /var/log/yum.*
+
+RUN useradd build
 
 ADD https://raw.githubusercontent.com/containers/buildah/main/contrib/buildahimage/stable/containers.conf /etc/containers/
 ADD https://raw.githubusercontent.com/containers/storage/main/storage.conf /etc/containers/
 
 
+RUN chmod 644 /etc/containers/containers.conf
+
 # Adjust storage.conf to enable Fuse storage.
-RUN sed -i /etc/containers/storage.conf \
-        -e 's|^#mount_program|mount_program|g' \
-        -e '/additionalimage.*/a "/var/lib/shared",'
+RUN chmod 644 /etc/containers/containers.conf; \
+    sed -i -e 's|^#mount_program|mount_program|g' \
+        -e '/additionalimage.*/a "/var/lib/shared",' \
+	-e 's|^mountopt[[:space:]]*=.*$|mountopt = "nodev,fsync=0"|g' \
+        /etc/containers/storage.conf
 
-RUN mkdir -p /var/lib/shared/overlay-images /var/lib/shared/overlay-layers \
- && touch /var/lib/shared/overlay-images/images.lock \
-          /var/lib/shared/overlay-layers/layers.lock
+RUN mkdir -p \
+    /var/lib/shared/overlay-images \
+    /var/lib/shared/overlay-layers \
+    /var/lib/shared/vfs-images \
+    /var/lib/shared/vfs-layers; \
+    touch /var/lib/shared/overlay-images/images.lock; \
+    touch /var/lib/shared/overlay-layers/layers.lock; \
+    touch /var/lib/shared/vfs-images/images.lock; \
+    touch /var/lib/shared/vfs-layers/layers.lock
 
+# Define uid/gid ranges for our user https://github.com/containers/buildah/issues/3053
+RUN echo -e "build:1:999\nbuild:1001:64535" > /etc/subuid; \
+ echo -e "build:1:999\nbuild:1001:64535" > /etc/subgid; \
+ mkdir -p /home/build/.local/share/containers; \
+ chown -R build:build /home/build
+
+VOLUME /var/lib/containers
+VOLUME /home/build/.local/share/containers
+
+# Set an environment variable to default to chroot isolation for RUN
+# instructions and "buildah run".
 ENV BUILDAH_ISOLATION=chroot
 
-RUN echo build:2000:50000 > /etc/subuid \
- && echo build:2000:50000 > /etc/subgid
+
+RUN touch /etc/subgid /etc/subuid \
+ && chmod g=u /etc/subgid /etc/subuid /etc/passwd \
+ && echo build:10000:65536 > /etc/subuid \
+ && echo build:10000:65536 > /etc/subgid
+
+ENV BUILDAH_ISOLATION=chroot
+RUN echo "export BUILDAH_ISOLATION=chroot" >> /home/build/.bashrc
+
+RUN mkdir -p /home/build/.config/containers \
+ && (echo '[storage]';echo 'driver = "vfs"') > /home/build/.config/containers/storage.conf
 
 COPY build.sh build
 COPY autobuild.sh autobuild
 
-RUN chgrp 0 /etc/containers/storage.conf && \ 
-    chmod g=u /etc/containers/storage.conf
-
 RUN chmod +x build
 RUN chmod +x autobuild
 
-USER 1001
+USER build
+WORKDIR /home/build
 
 ENTRYPOINT ["./autobuild"]
 CMD ["8"]
