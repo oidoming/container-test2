@@ -1,7 +1,7 @@
 #!/bin/sh
 
 releasever="$1"
-./build $releasever
+./build.sh $releasever
 
 testcontainer=$(buildah from "centos-stream-${releasever}-test")
 

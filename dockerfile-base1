@@ -1,40 +1,27 @@
 FROM quay.io/centoshyperscale/centos:stream8
 
-# from https://pagure.io/centos-sig-hyperscale/containers-releng/blob/main/f/Containerfile
+# Don't include container-selinux and remove
+# directories used by yum that are just taking
+# up space.
+RUN useradd -g 0 -u 1001 build
 
-RUN rpm --restore shadow-utils 2>/dev/null
-RUN dnf -y install tar gcc make curl buildah fuse-overlayfs xz; rm -rf /var/cache /var/log/dnf* /var/log/yum.*
-
-RUN useradd build
+RUN dnf -y update; rpm --restore shadow-utils 2>/dev/null; dnf -y install cpp buildah fuse-overlayfs xz; rm -rf /var/cache /var/log/dnf* /var/log/yum.*;
 
 ADD https://raw.githubusercontent.com/containers/buildah/main/contrib/buildahimage/stable/containers.conf /etc/containers/
 ADD https://raw.githubusercontent.com/containers/storage/main/storage.conf /etc/containers/
 
-
-RUN chmod 644 /etc/containers/containers.conf
+RUN chmod 644 /etc/containers/storage.conf
 
 # Adjust storage.conf to enable Fuse storage.
-RUN chmod 644 /etc/containers/containers.conf; \
-    sed -i -e 's|^#mount_program|mount_program|g' \
-        -e '/additionalimage.*/a "/var/lib/shared",' \
-	-e 's|^mountopt[[:space:]]*=.*$|mountopt = "nodev,fsync=0"|g' \
-        /etc/containers/storage.conf
-
-RUN mkdir -p \
-    /var/lib/shared/overlay-images \
-    /var/lib/shared/overlay-layers \
-    /var/lib/shared/vfs-images \
-    /var/lib/shared/vfs-layers; \
-    touch /var/lib/shared/overlay-images/images.lock; \
-    touch /var/lib/shared/overlay-layers/layers.lock; \
-    touch /var/lib/shared/vfs-images/images.lock; \
-    touch /var/lib/shared/vfs-layers/layers.lock
+RUN chmod 644 /etc/containers/containers.conf; sed -i -e 's|^#mount_program|mount_program|g' -e '/additionalimage.*/a "/var/lib/shared",' -e 's|^mountopt[[:space:]]*=.*$|mountopt = "nodev,fsync=0"|g' /etc/containers/storage.conf
+RUN mkdir -p /var/lib/shared/overlay-images /var/lib/shared/overlay-layers /var/lib/shared/vfs-images /var/lib/shared/vfs-layers; touch /var/lib/shared/overlay-images/images.lock; touch /var/lib/shared/overlay-layers/layers.lock; touch /var/lib/shared/vfs-images/images.lock; touch /var/lib/shared/vfs-layers/layers.lock
 
 # Define uid/gid ranges for our user https://github.com/containers/buildah/issues/3053
 RUN echo -e "build:1:999\nbuild:1001:64535" > /etc/subuid; \
  echo -e "build:1:999\nbuild:1001:64535" > /etc/subgid; \
  mkdir -p /home/build/.local/share/containers; \
- chown -R build:build /home/build
+ chown -R build:0 /home/build && \
+ chmod -R 777 /home/build
 
 VOLUME /var/lib/containers
 VOLUME /home/build/.local/share/containers
@@ -43,30 +30,33 @@ VOLUME /home/build/.local/share/containers
 # instructions and "buildah run".
 ENV BUILDAH_ISOLATION=chroot
 
+# from https://pagure.io/centos-sig-hyperscale/containers-releng/blob/main/f/Containerfile
 
 RUN touch /etc/subgid /etc/subuid \
  && chmod g=u /etc/subgid /etc/subuid /etc/passwd \
  && echo build:10000:65536 > /etc/subuid \
  && echo build:10000:65536 > /etc/subgid
 
-ENV BUILDAH_ISOLATION=chroot
+# Use chroot since the default runc does not work when running rootless
 RUN echo "export BUILDAH_ISOLATION=chroot" >> /home/build/.bashrc
 
+# Use VFS since fuse does not work
 RUN mkdir -p /home/build/.config/containers \
  && (echo '[storage]';echo 'driver = "vfs"') > /home/build/.config/containers/storage.conf
 
+RUN chgrp -R 0 /home/build/.config && \
+    chmod -R g=u /home/build/.config
+
 WORKDIR /home/build
 
-COPY build.sh build
-COPY autobuild.sh autobuild
+ADD build.sh .
+ADD autobuild.sh . 
 
-RUN chmod +x build
-RUN chmod +x autobuild
+RUN chmod a+x build.sh
+RUN chmod a+x autobuild.sh
 
-RUN chgrp -R 0 /home/build && \
-         chmod -R g=u /home/build
-USER build
+USER 1001
 
-ENTRYPOINT ["./autobuild"]
+ENTRYPOINT ["./autobuild.sh"]
 CMD ["8"]
 

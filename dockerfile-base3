@@ -1,0 +1,66 @@
+FROM quay.io/centoshyperscale/centos:stream8
+
+# from https://pagure.io/centos-sig-hyperscale/containers-releng/blob/main/f/Containerfile
+
+RUN rpm --restore shadow-utils 2>/dev/null
+RUN dnf -y install tar gcc make curl buildah fuse-overlayfs xz; rm -rf /var/cache /var/log/dnf* /var/log/yum.*
+
+RUN useradd build
+
+ADD https://raw.githubusercontent.com/containers/buildah/main/contrib/buildahimage/stable/containers.conf /etc/containers/
+ADD https://raw.githubusercontent.com/containers/storage/main/storage.conf /etc/containers/
+
+# Adjust storage.conf to enable Fuse storage.
+RUN chmod 644 /etc/containers/containers.conf; \
+    sed -i -e 's|^#mount_program|mount_program|g' \
+        -e '/additionalimage.*/a "/var/lib/shared",' \
+	-e 's|^mountopt[[:space:]]*=.*$|mountopt = "nodev,fsync=0"|g' \
+        /etc/containers/storage.conf
+
+RUN mkdir -p \
+    /var/lib/shared/overlay-images \
+    /var/lib/shared/overlay-layers \
+    /var/lib/shared/vfs-images \
+    /var/lib/shared/vfs-layers; \
+    touch /var/lib/shared/overlay-images/images.lock; \
+    touch /var/lib/shared/overlay-layers/layers.lock; \
+    touch /var/lib/shared/vfs-images/images.lock; \
+    touch /var/lib/shared/vfs-layers/layers.lock
+
+RUN  mkdir -p /home/build/.local/share/containers #; \
+#     chown -R 1001:0 /home/build
+
+VOLUME /var/lib/containers
+VOLUME /home/build/.local/share/containers
+
+# Set an environment variable to default to chroot isolation for RUN
+# instructions and "buildah run".
+ENV BUILDAH_ISOLATION=chroot
+
+RUN touch /etc/subgid /etc/subuid \
+ && chmod g=u /etc/subgid /etc/subuid /etc/passwd \
+ && echo 1001:1000:65536 > /etc/subuid \
+ && echo 1001:1000:65536 > /etc/subgid
+
+ENV BUILDAH_ISOLATION=chroot
+RUN echo "export BUILDAH_ISOLATION=chroot" >> /home/build/.bashrc
+
+RUN mkdir -p /home/build/.config/containers \
+ && (echo '[storage]';echo 'driver = "vfs"') > /home/build/.config/containers/storage.conf
+
+WORKDIR /home/build
+
+COPY build.sh build.sh
+COPY autobuild.sh autobuild
+
+RUN chmod +x build.sh
+RUN chmod +x autobuild
+
+RUN chgrp -R 0 /home/build && \
+         chmod -R g=u /home/build
+
+USER 1001
+
+ENTRYPOINT ["./autobuild"]
+CMD ["8"]
+
